@@ -6,9 +6,28 @@
 - 跟着玩家当前的主题走（颜色、字体、气泡框）。
 - 渲染库：[snapdom](https://github.com/zumerlab/snapdom)（借浏览器自己的渲染器，非 html2canvas 那种重写 CSS 的路线）。
 
-## 现状
+## 用法
 
-只有原型（`prototype/snap-proto.js`，控制台脚本），扩展本体还没写。
+每楼「…」菜单里的相机按钮 → 弹窗预览 → 保存 / 复制（PNG）/ 分享（系统分享面板，iPad 存相册走这里）。
+
+弹窗里可调，选过的会记住（`extensionSettings.messageSnapshot`）：
+
+| 选项 | 取值 | 默认 |
+| --- | --- | --- |
+| 格式 | JPEG / WebP / PNG | JPEG |
+| 清晰度 | 1× / 1.5× / 2× / 3× | 2× |
+| 质量 | 50–100（仅 JPEG、WebP） | 90 |
+| 底色 | 主题 / 透明（仅 PNG、WebP） | 主题 |
+
+换格式、质量、底色只重新编码；换清晰度才重截。长图超过浏览器画布上限会自动降倍率并提示；浏览器导不出的格式（Safari 的 WebP）自动换成 PNG/JPEG 并提示。
+
+参考体积（Theo #22，SIGVALD 收起）：JPEG 90 2× 1.1 MB；WebP 80 2× 465 KB；WebP 80 1× 203 KB；PNG 2× 3.8 MB。
+
+## 截取范围
+
+`.mes_block` 里屏幕上看得见的一切，只去掉楼层界面零件（名字行、按钮、swipe、计时、思维链块上的按钮）。正文里预设或卡自带的折叠块（如梦鲸「思考」）照截，不按预设特判。
+
+`prototype/snap-proto.js` 是最早的控制台原型，留作对照。
 
 ## 原型结论（2026-10-26，Theo 会话 #22 楼，桌面 Chrome）
 
@@ -24,7 +43,7 @@
 踩到的坑：
 
 1. **`<q>` 引号重复**：酒馆把 `q::before/::after` 的 content 设成 `""`，snapdom 不复制空 content，克隆里 UA 默认的 open-quote 回来了，出现 `“"If …"”`。修法：`afterClone` 插件往克隆里加 `q::before,q::after{content:none!important}`。
-2. **正文里的「梦鲸思客 - 思考」折叠块**在屏幕上是可见的（在 `.mes_text` 里，不是酒馆的思维链），所以会被截进去。是否默认去掉待定。
+2. **正文里的「梦鲸思客 - 思考」折叠块**在屏幕上是可见的（在 `.mes_text` 里，不是酒馆的思维链），所以会被截进去。定为照截（10-26 用户：别的卡不一定用这个预设）。
 
 ## 未验证
 
