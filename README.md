@@ -1,68 +1,93 @@
-# st-message-snapshot
+# Message Snapshot
 
-**English** — A SillyTavern UI extension that saves a single message as an image, exactly as it looks on screen: regex edits, card-script panels, TavernHelper iframes and the open/closed state of collapsibles all come through, in your current theme.
+[English](#english) · [中文](#中文)
 
-- Install: Extensions → *Install extension* → `https://github.com/ALeafWolf/st-message-snapshot`, then reload.
-- Use: the camera button in a message's "…" menu opens a preview with Format (JPEG / WebP / PNG), Scale (1–3×), Quality and Background (Theme / Wallpaper / Transparent). Save, Copy (clipboard is PNG-only in current browsers) or Share.
-- UI language follows SillyTavern's: Simplified Chinese for `zh-cn`, Traditional for `zh-tw` / `zh-hk`, English otherwise.
+## English
 
----
+A SillyTavern extension that saves a single chat message as an image — exactly as you see it.
 
-酒馆（SillyTavern）UI 扩展：把单独一楼存成一张图片，所见即所得。
+- **What you see is what you get.** Regex edits and hidden text, panels added by character cards or scripts, TavernHelper frames, and whether each collapsible is open or closed all appear in the image just as they do on screen.
+- **Matches your theme.** Colors, fonts and message boxes come from your current SillyTavern theme.
+- **Only the message.** The name line, buttons, swipe arrows and timers are left out.
 
-- 截的是渲染完的页面元素，regex 改写／隐藏、卡脚本插进来的面板、酒馆助手 iframe、折叠块的开合状态都按屏幕上的样子进图。
-- 跟着玩家当前的主题走（颜色、字体、气泡框）。
-- 渲染库：[snapdom](https://github.com/zumerlab/snapdom)（借浏览器自己的渲染器，非 html2canvas 那种重写 CSS 的路线）。
+### Install
 
-## 安装
+In SillyTavern, open **Extensions** (the cubes icon) → **Install extension**, enter
 
-酒馆 → 扩展（方块图标）→「安装扩展」→ 填 `https://github.com/ALeafWolf/st-message-snapshot` → 刷新页面。更新在扩展管理里点更新。
+```
+https://github.com/ALeafWolf/st-message-snapshot
+```
 
-## 用法
+and reload the page. To update later, use the update button in the extension manager.
 
-每楼「…」菜单里的相机按钮 → 弹窗预览 → 保存 / 复制（PNG）/ 分享（系统分享面板，iPad 存相册走这里）。
+### Use
 
-弹窗里可调，选过的会记住（`extensionSettings.messageSnapshot`）：
+Open a message's **…** menu and click the **camera** button. A preview opens where you can adjust:
+
+| Option | Choices | Default |
+| --- | --- | --- |
+| Format | JPEG / WebP / PNG | JPEG |
+| Scale | 1× / 1.5× / 2× / 3× | 2× |
+| Quality | 50–100 (JPEG and WebP) | 90 |
+| Background | Theme / Wallpaper / Transparent (PNG and WebP only) | Theme |
+
+The preview shows the image size and file size as you change settings, and your choices are remembered. Then **Save**, **Copy**, or **Share** (the system share sheet — on iPhone / iPad this is how you save to Photos).
+
+For a long message, JPEG at 2× is usually around 1 MB; WebP is about half that; PNG is several times larger.
+
+### Good to know
+
+- **Copy is always PNG.** Browsers only accept PNG images on the clipboard; scale and background still follow your settings.
+- **Wallpaper** fills the whole image, including its blur. On a long message the wallpaper is enlarged to cover it, so you see part of it rather than exactly what was behind the message on screen. Older Safari versions draw it without blur.
+- **Very long messages** may exceed what the browser can draw at the chosen scale; the scale is lowered automatically and the preview tells you.
+- **Safari can't export WebP**; it falls back to PNG or JPEG and the preview tells you.
+- Images in a message that are hosted on other sites may come out blank if that site doesn't allow it.
+
+The interface follows SillyTavern's language: Simplified Chinese, Traditional Chinese, or English.
+
+## 中文
+
+酒馆（SillyTavern）扩展：把单独一楼存成一张图片，所见即所得。
+
+- **屏幕上什么样，图就什么样。** regex 改写或隐藏的内容、角色卡和脚本加进来的面板、酒馆助手的界面、折叠块是开是关，都和屏幕上一致。
+- **跟着主题走。** 颜色、字体、消息框都用你当前的酒馆主题。
+- **只截这一楼的内容。** 名字行、按钮、swipe 箭头、计时这些界面零件不进图。
+
+### 安装
+
+酒馆里打开 **扩展**（方块图标）→ **安装扩展**，填入
+
+```
+https://github.com/ALeafWolf/st-message-snapshot
+```
+
+然后刷新页面。以后更新在扩展管理里点更新即可。
+
+### 使用
+
+点开某一楼的 **…** 菜单，点 **相机** 按钮，弹出预览，可以调：
 
 | 选项 | 取值 | 默认 |
 | --- | --- | --- |
 | 格式 | JPEG / WebP / PNG | JPEG |
 | 清晰度 | 1× / 1.5× / 2× / 3× | 2× |
-| 质量 | 50–100（仅 JPEG、WebP） | 90 |
+| 质量 | 50–100（JPEG、WebP） | 90 |
 | 底色 | 主题 / 壁纸 / 透明（仅 PNG、WebP） | 主题 |
 
-底色：
-- **主题**：主题遮罩色 + 楼层祖先的底色，不画壁纸。
-- **壁纸**：按屏幕上的叠法还原：body 底色 → 壁纸（`#bg_custom` 优先，其次 `#bg1`；视频取当前帧）按 `background-size` / `position` 铺满整张图，带壁纸元素自己的 `filter`（酒馆默认 `blur(3px)`，按倍率放大）→ 楼层祖先的底色。长图是把壁纸铺到整张图上，不是屏幕那一屏的切片。Safari 旧版不支持画布 `filter`，壁纸会不模糊。找不到壁纸时退回主题底色并提示。
+调的时候预览会显示图片尺寸和文件大小，选过的设置会记住。然后 **保存**、**复制** 或 **分享**（调系统分享面板，iPhone / iPad 存相册走这里）。
 
-换格式、质量、底色只重新编码；换清晰度才重截。长图超过浏览器画布上限会自动降倍率并提示；浏览器导不出的格式（Safari 的 WebP）自动换成 PNG/JPEG 并提示。
+一楼长消息用 JPEG 2× 一般在 1 MB 左右，WebP 约一半，PNG 会大好几倍。
 
-参考体积（Theo #22，SIGVALD 收起）：JPEG 90 2× 1.1 MB；WebP 80 2× 465 KB；WebP 80 1× 203 KB；PNG 2× 3.8 MB。
+### 说明
 
-## 截取范围
+- **复制出来总是 PNG。** 浏览器的剪贴板只收 PNG；清晰度和底色仍按你的设置。
+- **壁纸** 会铺满整张图，连模糊效果一起。长消息会把壁纸放大铺满，看到的是壁纸的一部分，不是屏幕上那一屏的背景。旧版 Safari 画出来不带模糊。
+- **特别长的楼** 在所选清晰度下可能超出浏览器能画的大小，会自动降低清晰度，预览里有提示。
+- **Safari 导不出 WebP**，会自动改用 PNG 或 JPEG，预览里有提示。
+- 消息里引用的外站图片，如果对方网站不允许，截出来可能是空白。
 
-`.mes_block` 里屏幕上看得见的一切，只去掉楼层界面零件（名字行、按钮、swipe、计时、思维链块上的按钮）。正文里预设或卡自带的折叠块（如梦鲸「思考」）照截，不按预设特判。
+界面语言跟着酒馆走：简体中文、繁体中文或英文。
 
-`prototype/snap-proto.js` 是最早的控制台原型，留作对照。
+---
 
-## 原型结论（2026-10-26，Theo 会话 #22 楼，桌面 Chrome）
-
-截取对象是 `.mes_block`，`exclude` + `excludeMode: "remove"` 去掉名字行、按钮、swipe、计时、思维链；底色＝ `#000` → `--SmartThemeBlurTintColor` → `#chat` 背景色依次压上，四周留 16px。
-
-| 验证项 | 结果 |
-| --- | --- |
-| 卡 CSS 伪元素画的标题（圣器室 `VESTIARIUM · 圣器室`，选择器以 `#chat.<线>` 为前提） | 截到，纸纹、蜡印都在 |
-| 梦鲸「梦境选项」（同源 iframe，挂在 `.mes_text` 里） | 截到，iframe 内样式完整 |
-| `.mes_text` 之后由卡脚本 `after()` 插入的 `<details>`（SIGVALD） | 收起、展开两种状态都截到，SVG 灯盏完整 |
-| 2× 输出 | 2141×4694，约 1.6 s |
-
-踩到的坑：
-
-1. **`<q>` 引号重复**：酒馆把 `q::before/::after` 的 content 设成 `""`，snapdom 不复制空 content，克隆里 UA 默认的 open-quote 回来了，出现 `“"If …"”`。修法：`afterClone` 插件往克隆里加 `q::before,q::after{content:none!important}`。
-2. **正文里的「梦鲸思客 - 思考」折叠块**在屏幕上是可见的（在 `.mes_text` 里，不是酒馆的思维链），所以会被截进去。定为照截（10-26 用户：别的卡不一定用这个预设）。
-
-## 未验证
-
-- iPad / Safari：画布面积上限（~16.7M 像素）、foreignObject 首绘图片空白、保存方式（长按 / `navigator.share`）。
-- 外链图片的 CORS；原型只在 flat 聊天样式下跑过，bubble / document 样式没试。
-- 内部滚动区（`max-height` + `overflow`）。
+Built on [snapdom](https://github.com/zumerlab/snapdom) (MIT). Maintainer notes: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
