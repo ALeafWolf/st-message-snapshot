@@ -160,7 +160,12 @@ async function openSnapshot(mes) {
         const s = settings();
         $(".mss-quality").hidden = !FORMATS[s.format].lossy;
         $(".mss-quality span").textContent = s.quality;
-        $('[data-k="background"]').disabled = !FORMATS[s.format].alpha;
+        // JPEG 没有透明通道：选项留着、置灰并说明，切回 PNG / WebP 时恢复之前选的底色。
+        const alpha = FORMATS[s.format].alpha;
+        const transparent = $('[data-k="background"] option[value="transparent"]');
+        transparent.disabled = !alpha;
+        transparent.textContent = alpha ? "透明" : "透明（仅 PNG / WebP）";
+        $('[data-k="background"]').value = alpha ? s.background : "theme";
     };
 
     async function render() {
