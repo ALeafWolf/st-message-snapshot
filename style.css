@@ -1,0 +1,108 @@
+.mss-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(0, 0, 0, 0.6);
+}
+
+.mss-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: min(100%, 1100px);
+    max-height: 100%;
+    padding: 14px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 10px;
+    background: var(--SmartThemeBlurTintColor);
+    color: var(--SmartThemeBodyColor);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.mss-dialog [hidden] {
+    display: none !important;
+}
+
+.mss-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    align-items: center;
+}
+
+.mss-controls label {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin: 0;
+    white-space: nowrap;
+}
+
+.mss-controls select {
+    width: auto;
+    margin: 0;
+}
+
+.mss-quality input {
+    width: 120px;
+}
+
+.mss-quality span {
+    min-width: 2em;
+    font-variant-numeric: tabular-nums;
+}
+
+.mss-info {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    font-size: 0.9em;
+    opacity: 0.85;
+}
+
+.mss-note {
+    color: var(--SmartThemeQuoteColor);
+}
+
+.mss-preview {
+    flex: 1;
+    min-height: 120px;
+    overflow: auto;
+    text-align: center;
+    border-radius: 6px;
+    background: repeating-conic-gradient(rgba(128, 128, 128, 0.18) 0 25%, transparent 0 50%) 0 0 / 16px 16px;
+}
+
+.mss-preview img {
+    max-width: 100%;
+    height: auto;
+    vertical-align: top;
+}
+
+.mss-busy .mss-preview img {
+    opacity: 0.4;
+}
+
+.mss-busy .mss-actions {
+    pointer-events: none;
+    opacity: 0.5;
+}
+
+.mss-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.mss-actions .menu_button {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin: 0;
+    padding: 6px 14px;
+}
