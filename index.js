@@ -56,15 +56,81 @@ function fitScale(block, wanted) {
     return wanted <= limit ? wanted : Math.floor(limit * 10) / 10;
 }
 
-/** 楼层下面垫着的主题底色，从外到内依次压上。backdrop-filter 截不到，壁纸不画。 */
-function themeLayers(block) {
+const isClear = (color) => !color || color === "transparent" || color === "rgba(0, 0, 0, 0)";
+
+/** 楼层祖先的底色，从外到内。body 的底色在壁纸下面（画布传播），壁纸模式要单独垫。 */
+function ancestorFills(block, includeBody) {
     const layers = [];
     for (let el = block.parentElement; el && el !== document.documentElement; el = el.parentElement) {
+        if (el === document.body && !includeBody) break;
         const bg = getComputedStyle(el).backgroundColor;
-        if (bg && bg !== "transparent" && bg !== "rgba(0, 0, 0, 0)") layers.unshift(bg);
+        if (!isClear(bg)) layers.unshift(bg);
     }
+    return layers;
+}
+
+/** 主题底色：不画壁纸，用主题遮罩色兜底。 */
+function themeLayers(block) {
     const tint = getComputedStyle(document.body).getPropertyValue("--SmartThemeBlurTintColor").trim();
-    return ["#000", ...(tint ? [tint] : []), ...layers];
+    return ["#000", ...(tint ? [tint] : []), ...ancestorFills(block, true)];
+}
+
+function fill(g, layers) {
+    for (const color of layers) {
+        g.fillStyle = color;
+        g.fillRect(0, 0, g.canvas.width, g.canvas.height);
+    }
+}
+
+/** 屏幕上的壁纸：聊天专属背景 #bg_custom 优先，其次 #bg1；图片或视频当前帧。 */
+function wallpaperSource() {
+    for (const el of document.querySelectorAll("#bg_custom, #bg1")) {
+        const cs = getComputedStyle(el);
+        if (cs.display === "none" || cs.visibility === "hidden" || Number(cs.opacity) === 0) continue;
+        const video = el.querySelector("video");
+        if (video?.videoWidth) return { cs, media: video };
+        const m = /url\("?(.+?)"?\)/.exec(cs.backgroundImage);
+        if (m) return { cs, url: m[1] };
+    }
+    return null;
+}
+
+const wallpaperCache = new Map(); // url → 已解码的 Image
+function loadImage(url) {
+    if (!wallpaperCache.has(url)) {
+        wallpaperCache.set(url, new Promise((ok, bad) => {
+            const img = new Image();
+            img.onload = () => ok(img);
+            img.onerror = () => { wallpaperCache.delete(url); bad(new Error("壁纸加载失败")); };
+            img.src = url;
+        }));
+    }
+    return wallpaperCache.get(url);
+}
+
+/** background-position 的一个分量 → 0..1；px 之类没法按长图换算的取居中。 */
+const positionFraction = (v) => (v?.endsWith("%") ? parseFloat(v) / 100 : 0.5);
+
+/** 按 background-size / position 把壁纸铺满整张图，带上壁纸元素自己的 filter（酒馆默认 blur）。 */
+async function drawWallpaper(g, scale) {
+    const src = wallpaperSource();
+    if (!src) return false;
+    const media = src.media || await loadImage(src.url);
+    const iw = media.videoWidth || media.naturalWidth;
+    const ih = media.videoHeight || media.naturalHeight;
+    if (!iw || !ih) return false;
+    const filter = src.cs.filter === "none" ? "none" : src.cs.filter.replace(/(-?[\d.]+)px/g, (_, n) => `${n * scale}px`);
+    // 模糊会把画布外的透明吸进来，边上发暗；四周多铺出两倍半径。
+    const over = 2 * Math.max(0, ...[...filter.matchAll(/blur\(([\d.]+)px\)/g)].map((m) => Number(m[1])));
+    const w = g.canvas.width + over * 2;
+    const h = g.canvas.height + over * 2;
+    const k = src.cs.backgroundSize === "contain" ? Math.min(w / iw, h / ih) : Math.max(w / iw, h / ih);
+    const [px, py] = src.cs.backgroundPosition.split(" ");
+    g.save();
+    g.filter = filter; // Safari 旧版不认 ctx.filter，退化成不模糊
+    g.drawImage(media, (w - iw * k) * positionFraction(px) - over, (h - ih * k) * positionFraction(py ?? px) - over, iw * k, ih * k);
+    g.restore();
+    return true;
 }
 
 async function capture(block, scale) {
@@ -75,20 +141,30 @@ async function capture(block, scale) {
     return shot.toCanvas();
 }
 
-function compose(raw, block, scale, background) {
+async function compose(raw, block, scale, background) {
     const pad = Math.round(PAD * scale);
     const canvas = document.createElement("canvas");
     canvas.width = raw.width + pad * 2;
     canvas.height = raw.height + pad * 2;
     const g = canvas.getContext("2d");
-    if (background === "theme") {
-        for (const fill of themeLayers(block)) {
-            g.fillStyle = fill;
-            g.fillRect(0, 0, canvas.width, canvas.height);
+    let note = "";
+    if (background === "wallpaper") {
+        fill(g, ["#000", getComputedStyle(document.body).backgroundColor]);
+        const drawn = await drawWallpaper(g, scale).catch((err) => {
+            console.warn("[message-snapshot]", err);
+            return false;
+        });
+        if (drawn) {
+            fill(g, ancestorFills(block, false));
+        } else {
+            note = "没找到能用的壁纸，已改用主题底色";
+            fill(g, themeLayers(block));
         }
+    } else if (background === "theme") {
+        fill(g, themeLayers(block));
     }
     g.drawImage(raw, pad, pad);
-    return canvas;
+    return { canvas, note };
 }
 
 const toBlob = (canvas, mime, quality) => new Promise((ok) => canvas.toBlob(ok, mime, quality));
@@ -113,6 +189,9 @@ function fileName(mes, ext) {
     return `${name} #${id}.${ext}`.replace(/[\\/:*?"<>|]/g, "_");
 }
 
+/** JPEG 没有透明通道，选了透明也只能用主题底色；设置里仍记着透明，切回 PNG / WebP 时恢复。 */
+const effectiveBackground = (s) => (s.background === "transparent" && !FORMATS[s.format].alpha ? "theme" : s.background);
+
 const kb = (bytes) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`);
 
 function optionList(pairs, current) {
@@ -126,7 +205,7 @@ function dialogHtml(s) {
     <label>格式<select class="text_pole" data-k="format">${optionList(Object.entries(FORMATS).map(([k, f]) => [k, f.label]), s.format)}</select></label>
     <label>清晰度<select class="text_pole" data-k="scale">${optionList(SCALES.map((n) => [n, `${n}×`]), s.scale)}</select></label>
     <label class="mss-quality">质量<input type="range" min="50" max="100" step="5" data-k="quality" value="${s.quality}"><span>${s.quality}</span></label>
-    <label>底色<select class="text_pole" data-k="background">${optionList([["theme", "主题"], ["transparent", "透明"]], s.background)}</select></label>
+    <label>底色<select class="text_pole" data-k="background">${optionList([["theme", "主题"], ["wallpaper", "壁纸"], ["transparent", "透明"]], s.background)}</select></label>
   </div>
   <div class="mss-info"><span class="mss-size">生成中…</span><span class="mss-note"></span></div>
   <div class="mss-preview"><img alt=""></div>
@@ -165,7 +244,7 @@ async function openSnapshot(mes) {
         const transparent = $('[data-k="background"] option[value="transparent"]');
         transparent.disabled = !alpha;
         transparent.textContent = alpha ? "透明" : "透明（仅 PNG / WebP）";
-        $('[data-k="background"]').value = alpha ? s.background : "theme";
+        $('[data-k="background"]').value = effectiveBackground(s);
     };
 
     async function render() {
@@ -176,8 +255,8 @@ async function openSnapshot(mes) {
             const s = settings();
             const scale = fitScale(block, Number(s.scale));
             if (!raws.has(scale)) raws.set(scale, await capture(block, scale));
-            const background = FORMATS[s.format].alpha ? s.background : "theme";
-            const canvas = compose(raws.get(scale), block, scale, background);
+            const composed = await compose(raws.get(scale), block, scale, effectiveBackground(s));
+            const canvas = composed.canvas;
             result = await encode(canvas, s.format, s.quality);
             result.canvas = canvas;
             if (url) URL.revokeObjectURL(url);
@@ -187,6 +266,7 @@ async function openSnapshot(mes) {
             $(".mss-size").textContent = `${canvas.width}×${canvas.height} · ${FORMATS[result.format].label} · ${kb(result.blob.size)}`;
             const notes = [];
             if (scale !== Number(s.scale)) notes.push(`长图超过浏览器画布上限，清晰度已降到 ${scale}×`);
+            if (composed.note) notes.push(composed.note);
             if (result.note) notes.push(result.note);
             $(".mss-note").textContent = notes.join("；");
             const label = FORMATS[result.format].label;
