@@ -1,5 +1,13 @@
 # st-message-snapshot
 
+**English** — A SillyTavern UI extension that saves a single message as an image, exactly as it looks on screen: regex edits, card-script panels, TavernHelper iframes and the open/closed state of collapsibles all come through, in your current theme.
+
+- Install: Extensions → *Install extension* → `https://github.com/ALeafWolf/st-message-snapshot`, then reload.
+- Use: the camera button in a message's "…" menu opens a preview with Format (JPEG / WebP / PNG), Scale (1–3×), Quality and Background (Theme / Wallpaper / Transparent). Save, Copy (clipboard is PNG-only in current browsers) or Share.
+- UI language follows SillyTavern's: Simplified Chinese for `zh-cn`, Traditional for `zh-tw` / `zh-hk`, English otherwise.
+
+---
+
 酒馆（SillyTavern）UI 扩展：把单独一楼存成一张图片，所见即所得。
 
 - 截的是渲染完的页面元素，regex 改写／隐藏、卡脚本插进来的面板、酒馆助手 iframe、折叠块的开合状态都按屏幕上的样子进图。

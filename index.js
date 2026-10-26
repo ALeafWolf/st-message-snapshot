@@ -24,6 +24,105 @@ const SAFARI = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userA
 const MAX_AREA = SAFARI ? 16_000_000 : 120_000_000;
 const MAX_SIDE = SAFARI ? 16_000 : 32_000;
 
+// 界面文字。不走酒馆的 addLocaleData：它拿英文原句当键、不许覆盖已有条目，"Save"、"Copy" 这类词会被酒馆自己的译法顶掉。
+const STRINGS = {
+    en: {
+        saveAsImage: "Save as image",
+        format: "Format",
+        scale: "Scale",
+        quality: "Quality",
+        background: "Background",
+        bgTheme: "Theme",
+        bgWallpaper: "Wallpaper",
+        bgTransparent: "Transparent",
+        bgTransparentAlphaOnly: "Transparent (PNG / WebP only)",
+        generating: "Generating…",
+        failed: "Failed to generate",
+        save: "Save",
+        copy: "Copy",
+        share: "Share",
+        close: "Close",
+        copyAs: "Copy {format}",
+        copyAsPng: "The clipboard only accepts PNG: copies a PNG at the current scale and background. {format} and quality apply to Save and Share only.",
+        copied: "Copied to clipboard",
+        copyFailed: "Copy failed: {error}",
+        shareFailed: "Share failed: {error}",
+        scaleClamped: "Image exceeds the browser's canvas limit; scale lowered to {scale}×",
+        noWallpaper: "No usable wallpaper found; using the theme background",
+        wallpaperLoadFailed: "Failed to load the wallpaper",
+        noEncoder: "This browser can't export {format}; using {fallback}",
+        canvasTooBig: "The image is too large for the browser to generate",
+        noteSeparator: "; ",
+    },
+    "zh-cn": {
+        saveAsImage: "存为图片",
+        format: "格式",
+        scale: "清晰度",
+        quality: "质量",
+        background: "底色",
+        bgTheme: "主题",
+        bgWallpaper: "壁纸",
+        bgTransparent: "透明",
+        bgTransparentAlphaOnly: "透明（仅 PNG / WebP）",
+        generating: "生成中…",
+        failed: "生成失败",
+        save: "保存",
+        copy: "复制",
+        share: "分享",
+        close: "关闭",
+        copyAs: "复制 {format}",
+        copyAsPng: "剪贴板只收 PNG：按当前清晰度和底色复制为 PNG，{format} 与质量设置只作用于保存和分享",
+        copied: "已复制到剪贴板",
+        copyFailed: "复制失败：{error}",
+        shareFailed: "分享失败：{error}",
+        scaleClamped: "长图超过浏览器画布上限，清晰度已降到 {scale}×",
+        noWallpaper: "没找到能用的壁纸，已改用主题底色",
+        wallpaperLoadFailed: "壁纸加载失败",
+        noEncoder: "这个浏览器导不出 {format}，已改用 {fallback}",
+        canvasTooBig: "画布太大，浏览器没能生成图片",
+        noteSeparator: "；",
+    },
+    "zh-tw": {
+        saveAsImage: "存為圖片",
+        format: "格式",
+        scale: "清晰度",
+        quality: "品質",
+        background: "底色",
+        bgTheme: "主題",
+        bgWallpaper: "桌布",
+        bgTransparent: "透明",
+        bgTransparentAlphaOnly: "透明（僅 PNG / WebP）",
+        generating: "產生中…",
+        failed: "產生失敗",
+        save: "儲存",
+        copy: "複製",
+        share: "分享",
+        close: "關閉",
+        copyAs: "複製 {format}",
+        copyAsPng: "剪貼簿只收 PNG：按目前清晰度和底色複製為 PNG，{format} 與品質設定只作用於儲存和分享",
+        copied: "已複製到剪貼簿",
+        copyFailed: "複製失敗：{error}",
+        shareFailed: "分享失敗：{error}",
+        scaleClamped: "長圖超過瀏覽器畫布上限，清晰度已降到 {scale}×",
+        noWallpaper: "找不到可用的桌布，已改用主題底色",
+        wallpaperLoadFailed: "桌布載入失敗",
+        noEncoder: "這個瀏覽器匯不出 {format}，已改用 {fallback}",
+        canvasTooBig: "畫布太大，瀏覽器沒能產生圖片",
+        noteSeparator: "；",
+    },
+};
+
+/** 酒馆界面语言 → 字典。繁体：zh-tw / zh-hk / zh-hant；其余中文走简体；别的语言都用英文。 */
+function pickStrings() {
+    const locale = String(SillyTavern.getContext().getCurrentLocale?.() || navigator.language || "en").toLowerCase();
+    if (!locale.startsWith("zh")) return STRINGS.en;
+    return /tw|hk|mo|hant/.test(locale) ? STRINGS["zh-tw"] : STRINGS["zh-cn"];
+}
+const LANG = pickStrings();
+
+/** 取文字并填 {占位}。 */
+const tr = (key, vars = {}) => (LANG[key] ?? STRINGS.en[key]).replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? "");
+
 // 酒馆把 <q> 的默认引号去掉了（::before/::after 的 content 是 ""），snapdom 不复制空 content，
 // 克隆里浏览器默认的 open-quote 又冒出来 →「“"If …"”」。在克隆里压回去。
 const quoteFix = {
@@ -101,7 +200,7 @@ function loadImage(url) {
         wallpaperCache.set(url, new Promise((ok, bad) => {
             const img = new Image();
             img.onload = () => ok(img);
-            img.onerror = () => { wallpaperCache.delete(url); bad(new Error("壁纸加载失败")); };
+            img.onerror = () => { wallpaperCache.delete(url); bad(new Error(tr("wallpaperLoadFailed"))); };
             img.src = url;
         }));
     }
@@ -157,7 +256,7 @@ async function compose(raw, block, scale, background) {
         if (drawn) {
             fill(g, ancestorFills(block, false));
         } else {
-            note = "没找到能用的壁纸，已改用主题底色";
+            note = tr("noWallpaper");
             fill(g, themeLayers(block));
         }
     } else if (background === "theme") {
@@ -179,8 +278,8 @@ async function encode(canvas, format, quality) {
     if (blob && blob.type === f.mime) return { blob, format, note: "" };
     const fallback = f.alpha ? "png" : "jpeg";
     const again = await toBlob(canvas, FORMATS[fallback].mime, quality / 100);
-    if (!again) throw new Error("画布太大，浏览器没能生成图片");
-    return { blob: again, format: fallback, note: `这个浏览器导不出 ${f.label}，已改用 ${FORMATS[fallback].label}` };
+    if (!again) throw new Error(tr("canvasTooBig"));
+    return { blob: again, format: fallback, note: tr("noEncoder", { format: f.label, fallback: FORMATS[fallback].label }) };
 }
 
 function fileName(mes, ext) {
@@ -199,21 +298,22 @@ function optionList(pairs, current) {
 }
 
 function dialogHtml(s) {
+    const backgrounds = [["theme", tr("bgTheme")], ["wallpaper", tr("bgWallpaper")], ["transparent", tr("bgTransparent")]];
     return `
-<div class="mss-dialog" role="dialog" aria-label="存为图片">
+<div class="mss-dialog" role="dialog" aria-label="${tr("saveAsImage")}">
   <div class="mss-controls">
-    <label>格式<select class="text_pole" data-k="format">${optionList(Object.entries(FORMATS).map(([k, f]) => [k, f.label]), s.format)}</select></label>
-    <label>清晰度<select class="text_pole" data-k="scale">${optionList(SCALES.map((n) => [n, `${n}×`]), s.scale)}</select></label>
-    <label class="mss-quality">质量<input type="range" min="50" max="100" step="5" data-k="quality" value="${s.quality}"><span>${s.quality}</span></label>
-    <label>底色<select class="text_pole" data-k="background">${optionList([["theme", "主题"], ["wallpaper", "壁纸"], ["transparent", "透明"]], s.background)}</select></label>
+    <label>${tr("format")}<select class="text_pole" data-k="format">${optionList(Object.entries(FORMATS).map(([k, f]) => [k, f.label]), s.format)}</select></label>
+    <label>${tr("scale")}<select class="text_pole" data-k="scale">${optionList(SCALES.map((n) => [n, `${n}×`]), s.scale)}</select></label>
+    <label class="mss-quality">${tr("quality")}<input type="range" min="50" max="100" step="5" data-k="quality" value="${s.quality}"><span>${s.quality}</span></label>
+    <label>${tr("background")}<select class="text_pole" data-k="background">${optionList(backgrounds, s.background)}</select></label>
   </div>
-  <div class="mss-info"><span class="mss-size">生成中…</span><span class="mss-note"></span></div>
+  <div class="mss-info"><span class="mss-size">${tr("generating")}</span><span class="mss-note"></span></div>
   <div class="mss-preview"><img alt=""></div>
   <div class="mss-actions">
-    <div class="menu_button mss-save"><i class="fa-solid fa-download"></i>保存</div>
-    <div class="menu_button mss-copy"><i class="fa-solid fa-copy"></i>复制</div>
-    <div class="menu_button mss-share" hidden><i class="fa-solid fa-share-nodes"></i>分享</div>
-    <div class="menu_button mss-close"><i class="fa-solid fa-xmark"></i>关闭</div>
+    <div class="menu_button mss-save"><i class="fa-solid fa-download"></i>${tr("save")}</div>
+    <div class="menu_button mss-copy"><i class="fa-solid fa-copy"></i>${tr("copy")}</div>
+    <div class="menu_button mss-share" hidden><i class="fa-solid fa-share-nodes"></i>${tr("share")}</div>
+    <div class="menu_button mss-close"><i class="fa-solid fa-xmark"></i>${tr("close")}</div>
   </div>
 </div>`;
 }
@@ -243,7 +343,7 @@ async function openSnapshot(mes) {
         const alpha = FORMATS[s.format].alpha;
         const transparent = $('[data-k="background"] option[value="transparent"]');
         transparent.disabled = !alpha;
-        transparent.textContent = alpha ? "透明" : "透明（仅 PNG / WebP）";
+        transparent.textContent = alpha ? tr("bgTransparent") : tr("bgTransparentAlphaOnly");
         $('[data-k="background"]').value = effectiveBackground(s);
     };
 
@@ -265,20 +365,18 @@ async function openSnapshot(mes) {
             img.style.width = `${canvas.width / scale}px`;
             $(".mss-size").textContent = `${canvas.width}×${canvas.height} · ${FORMATS[result.format].label} · ${kb(result.blob.size)}`;
             const notes = [];
-            if (scale !== Number(s.scale)) notes.push(`长图超过浏览器画布上限，清晰度已降到 ${scale}×`);
+            if (scale !== Number(s.scale)) notes.push(tr("scaleClamped", { scale }));
             if (composed.note) notes.push(composed.note);
             if (result.note) notes.push(result.note);
-            $(".mss-note").textContent = notes.join("；");
+            $(".mss-note").textContent = notes.join(tr("noteSeparator"));
             const label = FORMATS[result.format].label;
-            $(".mss-copy").title = canCopy(result.blob.type)
-                ? `复制 ${label}`
-                : `剪贴板只收 PNG：按当前清晰度和底色复制为 PNG，${label} 与质量设置只作用于保存和分享`;
+            $(".mss-copy").title = canCopy(result.blob.type) ? tr("copyAs", { format: label }) : tr("copyAsPng", { format: label });
             const file = new File([result.blob], fileName(mes, FORMATS[result.format].ext), { type: result.blob.type });
             $(".mss-share").hidden = !navigator.canShare?.({ files: [file] });
             result.file = file;
         } catch (err) {
             console.error("[message-snapshot]", err);
-            $(".mss-size").textContent = "生成失败";
+            $(".mss-size").textContent = tr("failed");
             $(".mss-note").textContent = String(err?.message || err);
         } finally {
             busy = false;
@@ -319,15 +417,15 @@ async function openSnapshot(mes) {
             try {
                 const blob = canCopy(result.blob.type) ? result.blob : await toBlob(result.canvas, "image/png");
                 await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
-                toastr.success("已复制到剪贴板");
+                toastr.success(tr("copied"));
             } catch (err) {
-                toastr.error(`复制失败：${err?.message || err}`);
+                toastr.error(tr("copyFailed", { error: err?.message || err }));
             }
         } else if (e.target.closest(".mss-share")) {
             try {
                 await navigator.share({ files: [result.file] });
             } catch (err) {
-                if (err?.name !== "AbortError") toastr.error(`分享失败：${err?.message || err}`);
+                if (err?.name !== "AbortError") toastr.error(tr("shareFailed", { error: err?.message || err }));
             }
         }
     });
@@ -336,7 +434,7 @@ async function openSnapshot(mes) {
     render();
 }
 
-const BUTTON = '<div title="存为图片" class="mes_button mes_snapshot fa-solid fa-camera interactable" tabindex="0" role="button"></div>';
+const BUTTON = `<div title="${tr("saveAsImage")}" class="mes_button mes_snapshot fa-solid fa-camera interactable" tabindex="0" role="button"></div>`;
 
 /** 模板里加一次，之后新渲染的楼层自带；已经在页面上的楼层补上。 */
 function addButtons() {
