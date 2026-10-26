@@ -93,6 +93,9 @@ function compose(raw, block, scale, background) {
 
 const toBlob = (canvas, mime, quality) => new Promise((ok) => canvas.toBlob(ok, mime, quality));
 
+// 剪贴板写图片目前各浏览器只收 PNG；哪天支持别的格式了就直接复制当前格式。
+const canCopy = (mime) => mime === "image/png" || !!globalThis.ClipboardItem?.supports?.(mime);
+
 /** 浏览器不会编码的格式（Safari 的 WebP）toBlob 会悄悄给 PNG，这里认出来换掉。 */
 async function encode(canvas, format, quality) {
     const f = FORMATS[format];
@@ -129,7 +132,7 @@ function dialogHtml(s) {
   <div class="mss-preview"><img alt=""></div>
   <div class="mss-actions">
     <div class="menu_button mss-save"><i class="fa-solid fa-download"></i>保存</div>
-    <div class="menu_button mss-copy" title="以 PNG 复制"><i class="fa-solid fa-copy"></i>复制</div>
+    <div class="menu_button mss-copy"><i class="fa-solid fa-copy"></i>复制</div>
     <div class="menu_button mss-share" hidden><i class="fa-solid fa-share-nodes"></i>分享</div>
     <div class="menu_button mss-close"><i class="fa-solid fa-xmark"></i>关闭</div>
   </div>
@@ -181,6 +184,10 @@ async function openSnapshot(mes) {
             if (scale !== Number(s.scale)) notes.push(`长图超过浏览器画布上限，清晰度已降到 ${scale}×`);
             if (result.note) notes.push(result.note);
             $(".mss-note").textContent = notes.join("；");
+            const label = FORMATS[result.format].label;
+            $(".mss-copy").title = canCopy(result.blob.type)
+                ? `复制 ${label}`
+                : `剪贴板只收 PNG：按当前清晰度和底色复制为 PNG，${label} 与质量设置只作用于保存和分享`;
             const file = new File([result.blob], fileName(mes, FORMATS[result.format].ext), { type: result.blob.type });
             $(".mss-share").hidden = !navigator.canShare?.({ files: [file] });
             result.file = file;
@@ -225,8 +232,8 @@ async function openSnapshot(mes) {
             a.click();
         } else if (e.target.closest(".mss-copy")) {
             try {
-                const png = result.blob.type === "image/png" ? result.blob : await toBlob(result.canvas, "image/png");
-                await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+                const blob = canCopy(result.blob.type) ? result.blob : await toBlob(result.canvas, "image/png");
+                await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
                 toastr.success("已复制到剪贴板");
             } catch (err) {
                 toastr.error(`复制失败：${err?.message || err}`);
