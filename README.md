@@ -6,6 +6,10 @@
 - 跟着玩家当前的主题走（颜色、字体、气泡框）。
 - 渲染库：[snapdom](https://github.com/zumerlab/snapdom)（借浏览器自己的渲染器，非 html2canvas 那种重写 CSS 的路线）。
 
+## 安装
+
+酒馆 → 扩展（方块图标）→「安装扩展」→ 填 `https://github.com/ALeafWolf/st-message-snapshot` → 刷新页面。更新在扩展管理里点更新。
+
 ## 用法
 
 每楼「…」菜单里的相机按钮 → 弹窗预览 → 保存 / 复制（PNG）/ 分享（系统分享面板，iPad 存相册走这里）。
