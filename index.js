@@ -1,5 +1,6 @@
 // 单楼存图：截的是渲染完的 .mes_block，regex、卡脚本插的面板、酒馆助手 iframe、折叠块开合都按屏幕上的样子进图。
 import { snapdom } from "./lib/snapdom.mjs";
+import { collectObstacles, planSlices } from "./slices.js";
 
 const MODULE = "messageSnapshot";
 const DEFAULTS = { format: "jpeg", scale: 2, quality: 90, background: "theme" };
@@ -17,12 +18,21 @@ const CHROME = [
     ".swipe_left", ".swipe_right", ".swipes-counter", ".mes_bias", ".mes_reasoning_actions",
 ];
 
-// 画布上限：iOS / Safari 约 1677 万像素（超了 toBlob 静默给空图），其余浏览器单边 32767。
+// 单张画布上限：iOS / Safari 约 1677 万像素（超了 toBlob 静默给空图），桌面浏览器单边 32767。
+// 安卓 WebView 的上限随机型变、查不到，先按下面的数试，画出来发现底部是空的就对半降（见 sideCap）。
+// 一张放不下的长楼按行缝切成几张，不降清晰度。
 const SAFARI = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent)
     || /iP(hone|ad|od)/.test(navigator.userAgent)
     || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-const MAX_AREA = SAFARI ? 16_000_000 : 120_000_000;
-const MAX_SIDE = SAFARI ? 16_000 : 32_000;
+const ANDROID = /android/i.test(navigator.userAgent);
+const MAX_AREA = SAFARI ? 16_000_000 : ANDROID ? 32_000_000 : 120_000_000;
+const MAX_SIDE = SAFARI || ANDROID ? 16_000 : 32_000;
+const MIN_SIDE = 2_000;
+const CAP_KEY = "messageSnapshot.sideCap";
+// 屏幕像素密度也算进倍率（手机上 1 个 CSS 像素是 2–3 个屏幕像素），但不超过这个数：再高只是文件变大。
+const MAX_DENSITY = 3;
+// 原图总像素不超过这个数才留在内存里（换格式、质量、底色时不用重画）；再大就每次重画，省内存。
+const KEEP_PIXELS = 40_000_000;
 
 // 界面文字。不走酒馆的 addLocaleData：它拿英文原句当键、不许覆盖已有条目，"Save"、"Copy" 这类词会被酒馆自己的译法顶掉。
 const STRINGS = {
@@ -48,6 +58,12 @@ const STRINGS = {
         copyFailed: "Copy failed: {error}",
         shareFailed: "Share failed: {error}",
         scaleClamped: "Image exceeds the browser's canvas limit; scale lowered to {scale}×",
+        pieces: "{count} images",
+        widthPx: "{width}px wide",
+        total: "{size} total",
+        split: "Too long for one image: split between lines into {count} images",
+        capLowered: "This browser cut off tall images; each image is now limited to {px}px",
+        maybeCut: "The bottom of an image may be incomplete",
         noWallpaper: "No usable wallpaper found; using the theme background",
         wallpaperLoadFailed: "Failed to load the wallpaper",
         noEncoder: "This browser can't export {format}; using {fallback}",
@@ -76,6 +92,12 @@ const STRINGS = {
         copyFailed: "复制失败：{error}",
         shareFailed: "分享失败：{error}",
         scaleClamped: "长图超过浏览器画布上限，清晰度已降到 {scale}×",
+        pieces: "共 {count} 张",
+        widthPx: "宽 {width}px",
+        total: "合计 {size}",
+        split: "一张放不下，已按行缝分成 {count} 张",
+        capLowered: "这个浏览器画不全太高的图，每张已限制在 {px}px 以内",
+        maybeCut: "图片底部可能没画全",
         noWallpaper: "没找到能用的壁纸，已改用主题底色",
         wallpaperLoadFailed: "壁纸加载失败",
         noEncoder: "这个浏览器导不出 {format}，已改用 {fallback}",
@@ -104,6 +126,12 @@ const STRINGS = {
         copyFailed: "複製失敗：{error}",
         shareFailed: "分享失敗：{error}",
         scaleClamped: "長圖超過瀏覽器畫布上限，清晰度已降到 {scale}×",
+        pieces: "共 {count} 張",
+        widthPx: "寬 {width}px",
+        total: "合計 {size}",
+        split: "一張放不下，已按行縫分成 {count} 張",
+        capLowered: "這個瀏覽器畫不全太高的圖，每張已限制在 {px}px 以內",
+        maybeCut: "圖片底部可能沒畫全",
         noWallpaper: "找不到可用的桌布，已改用主題底色",
         wallpaperLoadFailed: "桌布載入失敗",
         noEncoder: "這個瀏覽器匯不出 {format}，已改用 {fallback}",
@@ -147,12 +175,33 @@ function saveSettings(patch) {
     ctx().saveSettingsDebounced();
 }
 
-/** 能用的最大倍率：不超过所选，也不让画布超限。 */
-function fitScale(block, wanted) {
-    const w = block.offsetWidth + PAD * 2;
-    const h = block.offsetHeight + PAD * 2;
-    const limit = Math.min(Math.sqrt(MAX_AREA / (w * h)), MAX_SIDE / w, MAX_SIDE / h);
-    return wanted <= limit ? wanted : Math.floor(limit * 10) / 10;
+/** 单张图的边长上限。画出来发现被截断过的浏览器会记住一个更小的数。 */
+function sideCap() {
+    let learned = 0;
+    try { learned = Number(localStorage.getItem(CAP_KEY)) || 0; } catch { /* 存储不可用 */ }
+    return learned >= MIN_SIDE ? Math.min(learned, MAX_SIDE) : MAX_SIDE;
+}
+
+function lowerSideCap(px) {
+    try { localStorage.setItem(CAP_KEY, String(px)); } catch { /* 存储不可用 */ }
+}
+
+/** 所选清晰度在这块屏幕上想要的倍率：× 屏幕像素密度，封顶 MAX_DENSITY（所选更高就按所选）。 */
+function wantedDensity(wanted) {
+    return Math.min(wanted * (window.devicePixelRatio || 1), Math.max(wanted, MAX_DENSITY));
+}
+
+/** 图上每个 CSS 像素实际占几个像素：想要的倍率，但不让宽度超限。 */
+function density(block, wanted) {
+    const k = wantedDensity(wanted);
+    const limit = sideCap() / (block.offsetWidth + PAD * 2);
+    return k <= limit ? k : Math.floor(limit * 10) / 10;
+}
+
+/** 一张图最多放多高的正文（CSS 像素），边距另算。 */
+function sliceHeight(width, k) {
+    const px = Math.min(sideCap(), MAX_AREA / ((width + PAD * 2) * k));
+    return Math.max(200, Math.floor(px / k) - PAD * 2);
 }
 
 const isClear = (color) => !color || color === "transparent" || color === "rgba(0, 0, 0, 0)";
@@ -232,12 +281,77 @@ async function drawWallpaper(g, scale) {
     return true;
 }
 
-async function capture(block, scale) {
-    await document.fonts?.ready;
-    const shot = await snapdom(block, {
-        scale, embedFonts: true, exclude: CHROME, excludeMode: "remove", plugins: [quoteFix],
+/** 截图期间把界面零件在页面上也藏起来：量行缝要和克隆里的排版一致（克隆里它们被删掉了）。 */
+function hideChrome(block) {
+    const saved = [...block.querySelectorAll(CHROME.join(","))].map((el) => {
+        const entry = [el, el.style.getPropertyValue("display"), el.style.getPropertyPriority("display")];
+        el.style.setProperty("display", "none", "important");
+        return entry;
     });
-    return shot.toCanvas();
+    return () => {
+        for (const [el, value, priority] of saved) {
+            if (value) el.style.setProperty("display", value, priority);
+            else el.style.removeProperty("display");
+        }
+    };
+}
+
+/** snapdom 写进 SVG 的 viewBox（CSS 像素）：可截区域以它为准。读不出来给空数组。 */
+function viewBox(dataUrl) {
+    try {
+        // <svg …> 在最前面，全是 ASCII；只解开头一小段，免得切在多字节字符中间。
+        const head = decodeURIComponent(dataUrl.slice(0, 600).replace(/%[0-9A-Fa-f]?$/, ""));
+        const tag = head.match(/<svg\b[^>]*>/i)?.[0] || "";
+        return (/\bviewBox="([^"]+)"/i.exec(tag)?.[1] || "").trim().split(/[\s,]+/).map(Number);
+    } catch {
+        return [];
+    }
+}
+
+/** 克隆一次：之后每一张都从这份克隆里按区域取，不重新克隆。 */
+async function capture(block, k) {
+    await document.fonts?.ready;
+    const restore = hideChrome(block);
+    try {
+        const obstacles = collectObstacles(block);
+        const shot = await snapdom(block, {
+            scale: k, dpr: 1, embedFonts: true, exclude: CHROME, excludeMode: "remove", plugins: [quoteFix],
+        });
+        const box = viewBox(shot.url);
+        const view = box.length === 4 && box.every(Number.isFinite)
+            ? { x: box[0], y: box[1], width: box[2], height: box[3] }
+            : { x: 0, y: 0, width: block.offsetWidth, height: block.offsetHeight };
+        return { shot, view, obstacles, kept: new Map(), slicedFor: 0 };
+    } finally {
+        restore();
+    }
+}
+
+/** 取第 i 张的原图（透明底）。 */
+async function sliceCanvas(cap, slices, i) {
+    if (cap.kept.has(i)) return cap.kept.get(i);
+    if (slices.length === 1) return cap.shot.toCanvas();
+    const { top, bottom } = slices[i];
+    return cap.shot.toCanvas({ crop: { x: cap.view.x, y: cap.view.y + top, width: cap.view.width, height: bottom - top } });
+}
+
+/**
+ * 浏览器画不动太高的图时不报错，只是底部留空。这里拿量好的行位置去对：
+ * 这张图靠下的几行字所在的位置如果全是透明的，就是没画全。楼层自己有底色时判不出来，按画全了算。
+ */
+function looksTruncated(canvas, slice, obstacles, k) {
+    const floor = slice.top + (slice.bottom - slice.top) * 0.6;
+    const lines = obstacles.filter((o) => o.top >= floor && o.bottom <= slice.bottom).slice(-5);
+    if (!lines.length) return false;
+    const g = canvas.getContext("2d", { willReadFrequently: true });
+    for (const line of lines) {
+        const y = Math.floor((line.top - slice.top) * k);
+        const h = Math.min(canvas.height - y, Math.max(1, Math.ceil((line.bottom - line.top) * k)));
+        if (h < 1) continue;
+        const data = g.getImageData(0, y, canvas.width, h).data;
+        for (let i = 3; i < data.length; i += 4) if (data[i] > 8) return false;
+    }
+    return true;
 }
 
 async function compose(raw, block, scale, background) {
@@ -282,10 +396,10 @@ async function encode(canvas, format, quality) {
     return { blob: again, format: fallback, note: tr("noEncoder", { format: f.label, fallback: FORMATS[fallback].label }) };
 }
 
-function fileName(mes, ext) {
+function fileName(mes, ext, part = "") {
     const id = mes.getAttribute("mesid");
     const name = ctx().chat?.[id]?.name || ctx().name2 || "message";
-    return `${name} #${id}.${ext}`.replace(/[\\/:*?"<>|]/g, "_");
+    return `${name} #${id}${part}.${ext}`.replace(/[\\/:*?"<>|]/g, "_");
 }
 
 /** JPEG 没有透明通道，选了透明也只能用主题底色；设置里仍记着透明，切回 PNG / WebP 时恢复。 */
@@ -308,7 +422,7 @@ function dialogHtml(s) {
     <label>${tr("background")}<select class="text_pole" data-k="background">${optionList(backgrounds, s.background)}</select></label>
   </div>
   <div class="mss-info"><span class="mss-size">${tr("generating")}</span><span class="mss-note"></span></div>
-  <div class="mss-preview"><img alt=""></div>
+  <div class="mss-preview"></div>
   <div class="mss-actions">
     <div class="menu_button mss-save"><i class="fa-solid fa-download"></i>${tr("save")}</div>
     <div class="menu_button mss-copy"><i class="fa-solid fa-copy"></i>${tr("copy")}</div>
@@ -327,11 +441,10 @@ async function openSnapshot(mes) {
     overlay.innerHTML = dialogHtml(settings());
     document.body.append(overlay);
     const $ = (sel) => overlay.querySelector(sel);
-    const img = $(".mss-preview img");
+    const preview = $(".mss-preview");
 
-    const raws = new Map(); // 倍率 → snapdom 原图；换格式、质量、底色不用重截
-    let result = null;
-    let url = "";
+    const captures = new Map(); // 倍率 → 克隆；换格式、质量、底色不用重新克隆
+    let results = []; // 每张一项：{ blob, format, file, url, width, height, canvas }
     let busy = false;
     let pending = false;
 
@@ -347,33 +460,87 @@ async function openSnapshot(mes) {
         $('[data-k="background"]').value = effectiveBackground(s);
     };
 
+    const release = (list) => { for (const r of list) URL.revokeObjectURL(r.url); };
+
+    /** 按当前设置出全部分张。发现浏览器没画全就降单张上限重来，最多降到 MIN_SIDE。 */
+    async function produce(s, notes) {
+        for (;;) {
+            const k = density(block, Number(s.scale));
+            if (!captures.has(k)) captures.set(k, await capture(block, k));
+            const cap = captures.get(k);
+            const slices = planSlices(cap.view.height, sliceHeight(cap.view.width, k), cap.obstacles);
+            if (cap.slicedFor !== slices.length) { cap.kept.clear(); cap.slicedFor = slices.length; }
+            const keep = cap.view.width * cap.view.height * k * k <= KEEP_PIXELS;
+            const made = [];
+            let retry = false;
+            for (let i = 0; i < slices.length; i++) {
+                const raw = await sliceCanvas(cap, slices, i);
+                if (!cap.kept.has(i) && looksTruncated(raw, slices[i], cap.obstacles, k)) {
+                    if (raw.height > MIN_SIDE) {
+                        const px = Math.max(MIN_SIDE, Math.floor(raw.height / 2));
+                        console.warn(`[message-snapshot] ${raw.width}×${raw.height} came out blank at the bottom; limiting images to ${px}px`);
+                        lowerSideCap(px);
+                        notes.cap = tr("capLowered", { px });
+                        retry = true;
+                        break;
+                    }
+                    notes.cut = tr("maybeCut");
+                }
+                if (keep) cap.kept.set(i, raw);
+                const composed = await compose(raw, block, k, effectiveBackground(s));
+                if (composed.note) notes.wallpaper = composed.note;
+                const encoded = await encode(composed.canvas, s.format, s.quality);
+                if (encoded.note) notes.encoder = encoded.note;
+                const part = slices.length > 1 ? `-${i + 1}` : "";
+                const file = new File([encoded.blob], fileName(mes, FORMATS[encoded.format].ext, part), { type: encoded.blob.type });
+                made.push({
+                    blob: encoded.blob, format: encoded.format, file, url: URL.createObjectURL(encoded.blob),
+                    width: composed.canvas.width, height: composed.canvas.height,
+                    // 只有一张时留着画布，复制要用它转 PNG；多张时不留，省内存。
+                    canvas: slices.length === 1 ? composed.canvas : null,
+                });
+                if (slices.length > 1) composed.canvas.width = 0;
+                if (!keep) raw.width = 0;
+            }
+            if (!retry) return { made, k, slices };
+            release(made);
+            cap.kept.clear();
+        }
+    }
+
     async function render() {
         if (busy) { pending = true; return; }
         busy = true;
         overlay.classList.add("mss-busy");
         try {
             const s = settings();
-            const scale = fitScale(block, Number(s.scale));
-            if (!raws.has(scale)) raws.set(scale, await capture(block, scale));
-            const composed = await compose(raws.get(scale), block, scale, effectiveBackground(s));
-            const canvas = composed.canvas;
-            result = await encode(canvas, s.format, s.quality);
-            result.canvas = canvas;
-            if (url) URL.revokeObjectURL(url);
-            url = URL.createObjectURL(result.blob);
-            img.src = url;
-            img.style.width = `${canvas.width / scale}px`;
-            $(".mss-size").textContent = `${canvas.width}×${canvas.height} · ${FORMATS[result.format].label} · ${kb(result.blob.size)}`;
-            const notes = [];
-            if (scale !== Number(s.scale)) notes.push(tr("scaleClamped", { scale }));
-            if (composed.note) notes.push(composed.note);
-            if (result.note) notes.push(result.note);
-            $(".mss-note").textContent = notes.join(tr("noteSeparator"));
-            const label = FORMATS[result.format].label;
-            $(".mss-copy").title = canCopy(result.blob.type) ? tr("copyAs", { format: label }) : tr("copyAsPng", { format: label });
-            const file = new File([result.blob], fileName(mes, FORMATS[result.format].ext), { type: result.blob.type });
-            $(".mss-share").hidden = !navigator.canShare?.({ files: [file] });
-            result.file = file;
+            const notes = {};
+            const { made, k, slices } = await produce(s, notes);
+            release(results);
+            results = made;
+            preview.replaceChildren(...made.map((r) => {
+                const img = document.createElement("img");
+                img.alt = "";
+                img.src = r.url;
+                img.style.width = `${r.width / k}px`;
+                return img;
+            }));
+            const label = FORMATS[made[0].format].label;
+            const bytes = made.reduce((sum, r) => sum + r.blob.size, 0);
+            $(".mss-size").textContent = made.length === 1
+                ? `${made[0].width}×${made[0].height} · ${label} · ${kb(bytes)}`
+                : [tr("pieces", { count: made.length }), tr("widthPx", { width: made[0].width }), label, tr("total", { size: kb(bytes) })].join(" · ");
+            const list = [];
+            if (k < wantedDensity(Number(s.scale))) {
+                list.push(tr("scaleClamped", { scale: Math.round(k / (window.devicePixelRatio || 1) * 10) / 10 }));
+            }
+            if (slices.length > 1) list.push(tr("split", { count: slices.length }));
+            list.push(...Object.values(notes));
+            $(".mss-note").textContent = list.join(tr("noteSeparator"));
+            // 剪贴板一次只收一张图：分了张就不提供复制。
+            $(".mss-copy").hidden = made.length > 1;
+            $(".mss-copy").title = canCopy(made[0].blob.type) ? tr("copyAs", { format: label }) : tr("copyAsPng", { format: label });
+            $(".mss-share").hidden = !navigator.canShare?.({ files: made.map((r) => r.file) });
         } catch (err) {
             console.error("[message-snapshot]", err);
             $(".mss-size").textContent = tr("failed");
@@ -386,8 +553,9 @@ async function openSnapshot(mes) {
     }
 
     function close() {
-        if (url) URL.revokeObjectURL(url);
-        raws.clear();
+        release(results);
+        results = [];
+        captures.clear();
         overlay.remove();
         document.removeEventListener("keydown", onKey);
     }
@@ -407,15 +575,20 @@ async function openSnapshot(mes) {
 
     overlay.addEventListener("click", async (e) => {
         if (e.target === overlay || e.target.closest(".mss-close")) return close();
-        if (!result || busy) return;
+        if (!results.length || busy) return;
         if (e.target.closest(".mss-save")) {
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = result.file.name;
-            a.click();
+            // 多张逐个下载；浏览器第一次可能问一句是否允许下载多个文件。
+            for (const [i, r] of results.entries()) {
+                if (i) await new Promise((ok) => setTimeout(ok, 400));
+                const a = document.createElement("a");
+                a.href = r.url;
+                a.download = r.file.name;
+                a.click();
+            }
         } else if (e.target.closest(".mss-copy")) {
             try {
-                const blob = canCopy(result.blob.type) ? result.blob : await toBlob(result.canvas, "image/png");
+                const r = results[0];
+                const blob = canCopy(r.blob.type) ? r.blob : await toBlob(r.canvas, "image/png");
                 await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
                 toastr.success(tr("copied"));
             } catch (err) {
@@ -423,7 +596,7 @@ async function openSnapshot(mes) {
             }
         } else if (e.target.closest(".mss-share")) {
             try {
-                await navigator.share({ files: [result.file] });
+                await navigator.share({ files: results.map((r) => r.file) });
             } catch (err) {
                 if (err?.name !== "AbortError") toastr.error(tr("shareFailed", { error: err?.message || err }));
             }

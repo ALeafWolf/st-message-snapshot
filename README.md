@@ -39,7 +39,7 @@ For a long message, JPEG at 2× is usually around 1 MB; WebP is about half that;
 
 - **Copy is always PNG.** Browsers only accept PNG images on the clipboard; scale and background still follow your settings.
 - **Wallpaper** fills the whole image, including its blur. On a long message the wallpaper is enlarged to cover it, so you see part of it rather than exactly what was behind the message on screen. Older Safari versions draw it without blur.
-- **Very long messages** may exceed what the browser can draw at the chosen scale; the scale is lowered automatically and the preview tells you.
+- **Very long messages** that don't fit in one image are split into several, cut between lines so no text is sliced in half. Sharpness stays as chosen; the preview shows all of them, Save downloads them one by one (your browser may ask once whether to allow multiple downloads), and Copy is unavailable because the clipboard takes one image at a time. Choosing a lower scale gives fewer images.
 - **Safari can't export WebP**; it falls back to PNG or JPEG and the preview tells you.
 - Images in a message that are hosted on other sites may come out blank if that site doesn't allow it.
 
@@ -82,7 +82,7 @@ https://github.com/ALeafWolf/st-message-snapshot
 
 - **复制出来总是 PNG。** 浏览器的剪贴板只收 PNG；清晰度和底色仍按你的设置。
 - **壁纸** 会铺满整张图，连模糊效果一起。长消息会把壁纸放大铺满，看到的是壁纸的一部分，不是屏幕上那一屏的背景。旧版 Safari 画出来不带模糊。
-- **特别长的楼** 在所选清晰度下可能超出浏览器能画的大小，会自动降低清晰度，预览里有提示。
+- **特别长的楼** 一张图放不下时会分成几张，切在行与行之间，不会把字切成两半。清晰度不变；预览里几张都能看到，保存是逐张下载（浏览器第一次可能问是否允许下载多个文件），复制不可用（剪贴板一次只收一张图）。把清晰度调低，张数会变少。
 - **Safari 导不出 WebP**，会自动改用 PNG 或 JPEG，预览里有提示。
 - 消息里引用的外站图片，如果对方网站不允许，截出来可能是空白。
 

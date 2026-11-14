@@ -78,9 +78,15 @@
 }
 
 .mss-preview img {
+    display: block;
     max-width: 100%;
     height: auto;
-    vertical-align: top;
+    margin: 0 auto;
+}
+
+/* 分张时一张一张竖着排 */
+.mss-preview img + img {
+    margin-top: 12px;
 }
 
 .mss-busy .mss-preview img {
